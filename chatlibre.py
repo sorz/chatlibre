@@ -116,11 +116,11 @@ def main():
             sock = socket.socket(fileno=3)
             logging.info('Use systemd-passed socket')
 
-        keyfile = os.environ.get('CREDENTIALS_DIRECTORY', '') / Path('openai_key')
-        if keyfile.exists():
-            with keyfile.open() as f:
-                openai.api_key = f.read().strip()
-                logging.info(f'Load OpenAI API key from {keyfile}')
+    keyfile = os.environ.get('CREDENTIALS_DIRECTORY', '') / Path('openai_key')
+    if keyfile.exists():
+        with keyfile.open() as f:
+            openai.api_key = f.read().strip()
+            logging.info(f'Load OpenAI API key from {keyfile}')
 
     web.run_app(init(), sock=sock)
 
