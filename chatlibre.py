@@ -5,6 +5,7 @@ import json
 import socket
 import logging
 from functools import cache
+from pathlib import Path
 from typing import Dict
 
 import openai
@@ -105,8 +106,7 @@ async def init() -> web.Application:
 
 
 def main():
-    logging.basicConfig(
-            format='[%(levelname)s] %(message)s', level=logging.INFO)
+    logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
 
     sock = None
     if str(os.getpid()) == os.environ.get('LISTEN_PID'):
@@ -115,6 +115,12 @@ def main():
         if fds:
             sock = socket.socket(fileno=3)
             logging.info('Use systemd-passed socket')
+
+        keyfile = os.environ.get('CREDENTIALS_DIRECTORY', '') / Path('openai_key')
+        if keyfile.exists():
+            with keyfile.open() as f:
+                openai.api_key = f.read().strip()
+                logging.info(f'Load OpenAI API key from {keyfile}')
 
     web.run_app(init(), sock=sock)
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=ChatGPT translate service for mastodon, HTTP API endpoint
+
+[Socket]
+ListenStream=127.0.0.1:8010
+
+[Install]
+WantedBy=sockets.target
+
