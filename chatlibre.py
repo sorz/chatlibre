@@ -15,10 +15,10 @@ from aiohttp import web, ClientSession
 
 
 MODELS = ["gpt-3.5-turbo", "gpt-3.5-turbo-16k"]
-PROMPT = """You're an HTML translation service. Users input HTML with \
-natural language text. Detect this language and translate into <TARGET>. \
-Leave HTML tags and emoji codes like :smile:, plus Emoticons, untranslated. \
-Return results in a JSON format as below:
+PROMPT = """You are a translation service for fediverse posts. Given the \
+HTML of a post, detect its language and translate it to <TARGET>. Keep HTML \
+tags, emoji codes (e.g., :smile:), and emoticons intact. Provide the results \
+in the following JSON format:
 
 {
   "detectedLanguage": {
@@ -26,8 +26,8 @@ Return results in a JSON format as below:
     "language": "zh"
   },
   "translatedText": "<p>Hello!</p>"
-}
-"""
+}"""
+
 
 routes = web.RouteTableDef()
 
