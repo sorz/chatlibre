@@ -6,14 +6,15 @@ import socket
 import logging
 from functools import cache
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Any
 
 import openai
 from openai import ChatCompletion
+from openai.error import RateLimitError, OpenAIError
 from aiohttp import web, ClientSession
 
 
-MODEL = "gpt-3.5-turbo"
+MODELS = ["gpt-3.5-turbo", "gpt-3.5-turbo-16k"]
 PROMPT = """You're an HTML translation service. Users input HTML with \
 natural language text. Detect this language and translate into <TARGET>. \
 Leave HTML tags and emoji codes like :smile:, plus Emoticons, untranslated. \
@@ -63,26 +64,46 @@ async def languages(_: web.Request) -> web.Response:
     return web.json_response(langs)
 
 
-@routes.post('/translate')
-async def translate(request: web.Request) -> web.Response:
-    req = await request.json()
-    text, target_code = req['q'], req['target']
+async def chat(text: str, target_code: str, model: str) -> Dict[str, Any]:
     target = languages_code_name().get(target_code, target_code)
-    chat = await ChatCompletion.acreate(
-        model=MODEL,
+    comp = await ChatCompletion.acreate(
+        model=model,
         messages=[
             dict(role='system', content=PROMPT.replace('<TARGET>', target)),
             dict(role='user', content=text),
         ]
     )
-    logging.debug(chat)
-    resp = json.loads(chat.choices[0].message.content)
+    logging.debug(comp)
+    resp = json.loads(comp.choices[0].message.content)
     detected_lang = resp['detectedLanguage']['language']
     logging.info(
-        f'{detected_lang}/{target_code} '
-        f'{chat.usage.prompt_tokens}+{chat.usage.completion_tokens} tokens'
+        f'{model} {detected_lang}/{target_code} '
+        f'{comp.usage.prompt_tokens}+{comp.usage.completion_tokens} tokens'
     )
-    return web.json_response(resp)
+    return resp
+
+
+@routes.post('/translate')
+async def translate(request: web.Request) -> web.Response:
+    req = await request.json()
+    text, target_code = req['q'], req['target']
+    for model in MODELS:
+        try:
+            resp = await chat(text, target_code, model)
+            return web.json_response(resp)
+        except RateLimitError as err:
+            logging.warning(f"OpenAI rate limit: {err}")
+            raise web.HTTPTooManyRequests(text="Upstream rate limit")
+        except OpenAIError as err:
+            logging.warning(f"OpenAI error: {err}")
+            raise web.HTTPServiceUnavailable(text="Upstream API error")
+        except IOError as err:
+            logging.warning(f"OpenAI API I/O error: {err}")
+            raise web.HTTPServiceUnavailable(text="Upstream I/O error")
+        except (json.JSONDecodeError, KeyError) as err:
+            logging.info(f"Decoding error: {err} ({model})")
+    logging.warn("All models failed")
+    raise web.HTTPServiceUnavailable()
 
 
 async def on_startup(_: web.Application):
