@@ -14,19 +14,17 @@ from aiohttp import web, ClientSession
 
 
 MODEL = "gpt-3.5-turbo"
-PROMPT = """You are a translate service. User will input HTML that may \
-contain text in nature language and you will detect which language it is and \
-translate it to <TARGET>. Keep HTML tags untouched and only translate the \
-text part. Do not translate emoji code that surrounded by colons (e.g. \
-:smile:). Do not translate Emoticon/Kaomoji. Return result in a valid JSON.
+PROMPT = """You're an HTML translation service. Users input HTML with \
+natural language text. Detect this language and translate into <TARGET>. \
+Leave HTML tags and emoji codes like :smile:, plus Emoticons, untranslated. \
+Return results in a JSON format as below:
 
-Example output:
 {
-    "detectedLanguage": {
-        "confidence": 87,
-        "language": "zh"
-    },
-    "translatedText": "<p>Hello!</p>"
+  "detectedLanguage": {
+    "confidence": 87,
+    "language": "zh"
+  },
+  "translatedText": "<p>Hello!</p>"
 }
 """
 
