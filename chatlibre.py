@@ -67,13 +67,17 @@ async def languages(_: web.Request) -> web.Response:
     return web.json_response(langs)
 
 
-async def chat(text: List[str], target_code: str, model: str) -> Dict[str, Any]:
+async def chat(text: List[str] | str, target_code: str, model: str) -> Dict[str, Any]:
+    if isinstance(text, str):
+        text_list = [text]
+    else:
+        text_list = text
     target = languages_code_name().get(target_code, target_code)
     comp = await ChatCompletion.acreate(
         model=model,
         messages=[
             dict(role='system', content=PROMPT.replace('<TARGET>', target)),
-            dict(role='user', content=json.dumps(text)),
+            dict(role='user', content=json.dumps(text_list, ensure_ascii=False)),
         ]
     )
     logging.debug(comp)
@@ -83,6 +87,8 @@ async def chat(text: List[str], target_code: str, model: str) -> Dict[str, Any]:
         f'{model} {detected_lang}/{target_code} '
         f'{comp.usage.prompt_tokens}+{comp.usage.completion_tokens} tokens'
     )
+    if isinstance(text, str):
+        resp['translatedText'] = resp['translatedText'][0]
     return resp
 
 
