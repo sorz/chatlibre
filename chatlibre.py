@@ -6,7 +6,7 @@ import socket
 import logging
 from functools import cache
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import openai
 from openai import ChatCompletion
@@ -15,17 +15,20 @@ from aiohttp import web, ClientSession
 
 
 MODELS = ["gpt-3.5-turbo", "gpt-3.5-turbo-16k"]
-PROMPT = """You are a translation service for fediverse posts. Given the \
-HTML of a post, detect its language and translate it to <TARGET>. Keep HTML \
-tags, emoji codes (e.g., :smile:), and emoticons intact. Provide the results \
-in the following JSON format:
+PROMPT = """You are a translation service for fediverse posts. Given JSON \
+array of text, detect its language and translate each text to <TARGET>. Keep \
+HTML tags, emoji codes (e.g., :smile:), and emoticons intact. Provide the \
+results in the following JSON format:
 
 {
   "detectedLanguage": {
     "confidence": 87,
     "language": "zh"
   },
-  "translatedText": "<p>Hello!</p>"
+  "translatedText": [
+    "<p>Hello!</p>",
+    "Bye"
+  ]
 }"""
 
 
@@ -64,13 +67,13 @@ async def languages(_: web.Request) -> web.Response:
     return web.json_response(langs)
 
 
-async def chat(text: str, target_code: str, model: str) -> Dict[str, Any]:
+async def chat(text: List[str], target_code: str, model: str) -> Dict[str, Any]:
     target = languages_code_name().get(target_code, target_code)
     comp = await ChatCompletion.acreate(
         model=model,
         messages=[
             dict(role='system', content=PROMPT.replace('<TARGET>', target)),
-            dict(role='user', content=text),
+            dict(role='user', content=json.dumps(text)),
         ]
     )
     logging.debug(comp)
@@ -87,6 +90,8 @@ async def chat(text: str, target_code: str, model: str) -> Dict[str, Any]:
 async def translate(request: web.Request) -> web.Response:
     req = await request.json()
     text, target_code = req['q'], req['target']
+    if isinstance(text, str):
+        text = [text]
     for model in MODELS:
         try:
             resp = await chat(text, target_code, model)
