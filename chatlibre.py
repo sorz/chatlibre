@@ -14,7 +14,8 @@ from openai.error import RateLimitError, OpenAIError
 from aiohttp import web, ClientSession
 
 
-MODELS = ["gpt-3.5-turbo", "gpt-3.5-turbo-16k"]
+MODELS = ["gpt-3.5-turbo-1106", "gpt-4-1106-preview"]
+MODELS_USE_JSON_MODE = True
 PROMPT = """You are a translation service for fediverse posts. Given JSON \
 array of text, detect its language and translate each text to <TARGET>. Keep \
 HTML tags, emoji codes (e.g., :smile:), and emoticons intact. Provide the \
@@ -73,13 +74,16 @@ async def chat(text: List[str] | str, target_code: str, model: str) -> Dict[str,
     else:
         text_list = text
     target = languages_code_name().get(target_code, target_code)
-    comp = await ChatCompletion.acreate(
+    kwargs: Dict[str, Any] = dict(
         model=model,
         messages=[
             dict(role='system', content=PROMPT.replace('<TARGET>', target)),
             dict(role='user', content=json.dumps(text_list, ensure_ascii=False)),
         ]
     )
+    if MODELS_USE_JSON_MODE:
+        kwargs['response_format'] = dict(type='json_object')
+    comp = await ChatCompletion.acreate(**kwargs)
     logging.debug(comp)
     resp = json.loads(comp.choices[0].message.content)
     detected_lang = resp['detectedLanguage']['language']
