@@ -9,9 +9,8 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 import openai
-from openai import ChatCompletion
-from openai.error import RateLimitError, OpenAIError
-from aiohttp import web, ClientSession
+from openai import AsyncOpenAI
+from aiohttp import web
 
 
 MODELS = ["gpt-3.5-turbo-1106", "gpt-4-1106-preview"]
@@ -34,6 +33,7 @@ results in the following JSON format:
 
 
 routes = web.RouteTableDef()
+openai_app_key = web.AppKey("openai_key", AsyncOpenAI)
 
 
 @cache
@@ -68,7 +68,12 @@ async def languages(_: web.Request) -> web.Response:
     return web.json_response(langs)
 
 
-async def chat(text: List[str] | str, target_code: str, model: str) -> Dict[str, Any]:
+async def chat(
+    client: AsyncOpenAI,
+    text: List[str] | str,
+    target_code: str,
+    model: str
+) -> Dict[str, Any]:
     if isinstance(text, str):
         text_list = [text]
     else:
@@ -83,7 +88,7 @@ async def chat(text: List[str] | str, target_code: str, model: str) -> Dict[str,
     )
     if MODELS_USE_JSON_MODE:
         kwargs['response_format'] = dict(type='json_object')
-    comp = await ChatCompletion.acreate(**kwargs)
+    comp = await client.completions.create(**kwargs)
     logging.debug(comp)
     resp = json.loads(comp.choices[0].message.content)
     detected_lang = resp['detectedLanguage']['language']
@@ -98,18 +103,19 @@ async def chat(text: List[str] | str, target_code: str, model: str) -> Dict[str,
 
 @routes.post('/translate')
 async def translate(request: web.Request) -> web.Response:
+    client = request.app[openai_app_key]
     req = await request.json()
     text, target_code = req['q'], req['target']
     if isinstance(text, str):
         text = [text]
     for model in MODELS:
         try:
-            resp = await chat(text, target_code, model)
+            resp = await chat(client, text, target_code, model)
             return web.json_response(resp)
-        except RateLimitError as err:
+        except openai.RateLimitError as err:
             logging.warning(f"OpenAI rate limit: {err}")
             raise web.HTTPTooManyRequests(text="Upstream rate limit")
-        except OpenAIError as err:
+        except openai.OpenAIError as err:
             logging.warning(f"OpenAI error: {err}")
             raise web.HTTPServiceUnavailable(text="Upstream API error")
         except IOError as err:
@@ -121,20 +127,14 @@ async def translate(request: web.Request) -> web.Response:
     raise web.HTTPServiceUnavailable()
 
 
-async def on_startup(_: web.Application):
-    openai.aiosession.set(ClientSession())
+async def on_cleanup(app: web.Application):
+    del app[openai_app_key]
 
 
-async def on_cleanup(_: web.Application):
-    session = openai.aiosession.get()
-    if session is not None:
-        await session.close()
-
-
-async def init() -> web.Application:
+async def init(openai_api_key: str | None) -> web.Application:
     app = web.Application()
     app.add_routes(routes)
-    app.on_startup.append(on_startup)
+    app[openai_app_key] = AsyncOpenAI(api_key=openai_api_key)
     app.on_cleanup.append(on_cleanup)
     return app
 
@@ -150,13 +150,14 @@ def main():
             sock = socket.socket(fileno=3)
             logging.info('Use systemd-passed socket')
 
+    openai_api_key = None
     keyfile = os.environ.get('CREDENTIALS_DIRECTORY', '') / Path('openai_key')
     if keyfile.exists():
         with keyfile.open() as f:
-            openai.api_key = f.read().strip()
+            openai_api_key = f.read().strip()
             logging.info(f'Load OpenAI API key from {keyfile}')
 
-    web.run_app(init(), sock=sock)
+    web.run_app(init(openai_api_key), sock=sock)
 
 
 if __name__ == '__main__':
