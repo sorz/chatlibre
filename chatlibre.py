@@ -88,7 +88,7 @@ async def chat(
     )
     if MODELS_USE_JSON_MODE:
         kwargs['response_format'] = dict(type='json_object')
-    comp = await client.completions.create(**kwargs)
+    comp = await client.chat.completions.create(**kwargs)
     logging.debug(comp)
     resp = json.loads(comp.choices[0].message.content)
     detected_lang = resp['detectedLanguage']['language']
