@@ -13,7 +13,7 @@ from openai import AsyncOpenAI
 from aiohttp import web
 
 
-MODELS = ["gpt-3.5-turbo-1106", "gpt-4-1106-preview"]
+MODELS = ["gpt-4o-mini"]
 MODELS_USE_JSON_MODE = True
 PROMPT = """You are a translation service for fediverse posts. Given JSON \
 array of text, detect its language and translate each text to <TARGET>. Keep \
