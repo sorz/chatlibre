@@ -4,6 +4,9 @@ Enable ChatGPT API-powered translation on your Mastodon instance!
 A lightweight scirpt that act as LibreTranslate service but chat with GPT to
 get translation done.
 
+![Scooby doo mask reveal meme. Before reveal: LibreTranslate;
+after: OpenAI.](/assets/meme.webp)
+
 ## Setup
 
 Prerequisite: [openai-python](https://github.com/openai/openai-python)
