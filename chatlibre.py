@@ -38,41 +38,39 @@ openai_app_key = web.AppKey("openai_key", AsyncOpenAI)
 
 @cache
 def languages_code_name() -> Dict[str, str]:
-    with open('iso_639_1.csv', newline='') as f:
-        reader = csv.reader(f, delimiter=',')
-        return { code: name for code, name, _ in reader }
+    with open("iso_639_1.csv", newline="") as f:
+        reader = csv.reader(f, delimiter=",")
+        return {code: name for code, name, _ in reader}
 
 
 def generate_supported_languages():
     langs = []
     codes = []
-    with open('iso_639_1.csv', newline='') as f:
-        reader = csv.reader(f, delimiter=',')
+    with open("iso_639_1.csv", newline="") as f:
+        reader = csv.reader(f, delimiter=",")
         for code, name, _ in reader:
             codes.append(code)
             langs.append(dict(code=code, name=name, targets=codes))
     return langs
 
 
-@routes.get('/')
+@routes.get("/")
 async def index(_: web.Request) -> web.Response:
     return web.Response(text="It's running!")
 
 
-@routes.get('/languages')
+@routes.get("/languages")
 async def languages(_: web.Request) -> web.Response:
     code_name = languages_code_name()
     targets = list(code_name.keys())
-    langs = [dict(code=code, name=name, targets=targets)
-             for code, name in code_name.items()]
+    langs = [
+        dict(code=code, name=name, targets=targets) for code, name in code_name.items()
+    ]
     return web.json_response(langs)
 
 
 async def chat(
-    client: AsyncOpenAI,
-    text: List[str] | str,
-    target_code: str,
-    model: str
+    client: AsyncOpenAI, text: List[str] | str, target_code: str, model: str
 ) -> Dict[str, Any]:
     if isinstance(text, str):
         text_list = [text]
@@ -82,30 +80,30 @@ async def chat(
     kwargs: Dict[str, Any] = dict(
         model=model,
         messages=[
-            dict(role='system', content=PROMPT.replace('<TARGET>', target)),
-            dict(role='user', content=json.dumps(text_list, ensure_ascii=False)),
-        ]
+            dict(role="system", content=PROMPT.replace("<TARGET>", target)),
+            dict(role="user", content=json.dumps(text_list, ensure_ascii=False)),
+        ],
     )
     if MODELS_USE_JSON_MODE:
-        kwargs['response_format'] = dict(type='json_object')
+        kwargs["response_format"] = dict(type="json_object")
     comp = await client.chat.completions.create(**kwargs)
     logging.debug(comp)
     resp = json.loads(comp.choices[0].message.content)
-    detected_lang = resp['detectedLanguage']['language']
+    detected_lang = resp["detectedLanguage"]["language"]
     logging.info(
-        f'{model} {detected_lang}/{target_code} '
-        f'{comp.usage.prompt_tokens}+{comp.usage.completion_tokens} tokens'
+        f"{model} {detected_lang}/{target_code} "
+        f"{comp.usage.prompt_tokens}+{comp.usage.completion_tokens} tokens"
     )
     if isinstance(text, str):
-        resp['translatedText'] = resp['translatedText'][0]
+        resp["translatedText"] = resp["translatedText"][0]
     return resp
 
 
-@routes.post('/translate')
+@routes.post("/translate")
 async def translate(request: web.Request) -> web.Response:
     client = request.app[openai_app_key]
     req = await request.json()
-    text, target_code = req['q'], req['target']
+    text, target_code = req["q"], req["target"]
     if isinstance(text, str):
         text = [text]
     for model in MODELS:
@@ -140,26 +138,25 @@ async def init(openai_api_key: str | None) -> web.Application:
 
 
 def main():
-    logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
+    logging.basicConfig(format="[%(levelname)s] %(message)s", level=logging.INFO)
 
     sock = None
-    if str(os.getpid()) == os.environ.get('LISTEN_PID'):
-        logging.info('Systemd awared')
-        fds = int(os.environ.get('LISTEN_FDS', 0))
+    if str(os.getpid()) == os.environ.get("LISTEN_PID"):
+        logging.info("Systemd awared")
+        fds = int(os.environ.get("LISTEN_FDS", 0))
         if fds:
             sock = socket.socket(fileno=3)
-            logging.info('Use systemd-passed socket')
+            logging.info("Use systemd-passed socket")
 
     openai_api_key = None
-    keyfile = os.environ.get('CREDENTIALS_DIRECTORY', '') / Path('openai_key')
+    keyfile = os.environ.get("CREDENTIALS_DIRECTORY", "") / Path("openai_key")
     if keyfile.exists():
         with keyfile.open() as f:
             openai_api_key = f.read().strip()
-            logging.info(f'Load OpenAI API key from {keyfile}')
+            logging.info(f"Load OpenAI API key from {keyfile}")
 
     web.run_app(init(openai_api_key), sock=sock)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-
