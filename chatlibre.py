@@ -4,41 +4,65 @@ import csv
 import json
 import socket
 import logging
-from functools import cache
+import argparse
 from pathlib import Path
-from typing import Dict, Any, List
+from functools import cache
+from dataclasses import dataclass
+from typing import Dict, Any, Union
 
 import openai
 from openai import AsyncOpenAI
 from aiohttp import web
+from pydantic import BaseModel, ValidationError, PositiveInt
 
 
-MODELS = ["gpt-4o-mini"]
-MODELS_USE_JSON_MODE = True
-PROMPT = """You are a translation service for fediverse posts. Given JSON \
-array of text, detect its language and translate each text to <TARGET>. Keep \
-HTML tags, emoji codes (e.g., :smile:), and emoticons intact. Provide the \
-results in the following JSON format:
+DEFAULT_MODEL = "gpt-4o-mini"
+TAG_TARGET = "<TARGET>"
+TAG_EXAMPLE = "<OUTPUT_EXAMPLE>"
+PROMPT = f"""You are a translation service for fediverse posts. Given JSON \
+array of text, detect its language and translate each text to {TAG_TARGET}. \
+Keep HTML tags, emoji codes (e.g. `:smile:`), and emoticons intact. Provide \
+the results in the following JSON format:
 
-{
-  "detectedLanguage": {
-    "confidence": 87,
-    "language": "zh"
-  },
-  "translatedText": [
-    "<p>Hello!</p>",
-    "Bye"
-  ]
-}"""
+{TAG_EXAMPLE}"""
 
+
+class DetectedLanguage(BaseModel):
+    code: str
+    confidence: PositiveInt
+
+
+class Translation(BaseModel):
+    detected_language: DetectedLanguage
+    translated_text: list[str]
+
+
+@dataclass
+class Args:
+    model: str
+    disable_json_mode: bool
+    disable_structured_output: bool
+    listen_host: str
+    listen_port: int
+    log_level: str
+
+
+@dataclass
+class ResponseType:
+    type: str
+
+
+RESPONSE_FORMAT_TEXT = ResponseType("text")
+RESPONSE_FORMAT_JSON = ResponseType("json_object")
 
 routes = web.RouteTableDef()
-openai_app_key = web.AppKey("openai_key", AsyncOpenAI)
+key_openai_app = web.AppKey("key_openai", AsyncOpenAI)
+key_args = web.AppKey("key_args", Args)
 
 
 @cache
 def languages_code_name() -> Dict[str, str]:
-    with open("iso_639_1.csv", newline="") as f:
+    with open("iso_639_1.csv", newline="", encoding="utf-8") as f:
         reader = csv.reader(f, delimiter=",")
         return {code: name for code, name, _ in reader}
 
@@ -52,6 +76,21 @@ def generate_supported_languages():
             codes.append(code)
             langs.append(dict(code=code, name=name, targets=codes))
     return langs
+
+
+EXAMPLE = Translation(
+    detected_language=DetectedLanguage(
+        code="zh",
+        confidence=87,
+    ),
+    translated_text=["<p>Hello</p>", "Bye"],
+)
+
+
+def prompt(target_lang_code: str) -> str:
+    lang = languages_code_name().get(target_lang_code, target_lang_code)
+    example = EXAMPLE.model_dump_json(indent=2)
+    return PROMPT.replace(TAG_EXAMPLE, example).replace(TAG_TARGET, lang)
 
 
 @routes.get("/")
@@ -70,23 +109,24 @@ async def languages(_: web.Request) -> web.Response:
 
 
 async def chat(
-    client: AsyncOpenAI, text: List[str] | str, target_code: str, model: str
+    client: AsyncOpenAI,
+    text: list[str] | str,
+    target_code: str,
+    model: str,
+    response_format: Union[ResponseType, Translation],
 ) -> Dict[str, Any]:
     if isinstance(text, str):
         text_list = [text]
     else:
         text_list = text
-    target = languages_code_name().get(target_code, target_code)
-    kwargs: Dict[str, Any] = dict(
+    comp = await client.chat.completions.create(
         model=model,
+        response_format=response_format,
         messages=[
-            dict(role="system", content=PROMPT.replace("<TARGET>", target)),
+            dict(role="system", content=prompt(target_code)),
             dict(role="user", content=json.dumps(text_list, ensure_ascii=False)),
         ],
     )
-    if MODELS_USE_JSON_MODE:
-        kwargs["response_format"] = dict(type="json_object")
-    comp = await client.chat.completions.create(**kwargs)
     logging.debug(comp)
     resp = json.loads(comp.choices[0].message.content)
     detected_lang = resp["detectedLanguage"]["language"]
@@ -101,44 +141,89 @@ async def chat(
 
 @routes.post("/translate")
 async def translate(request: web.Request) -> web.Response:
-    client = request.app[openai_app_key]
+    args = request.app[key_args]
+    client = request.app[key_openai_app]
     req = await request.json()
     text, target_code = req["q"], req["target"]
     if isinstance(text, str):
         text = [text]
-    for model in MODELS:
-        try:
-            resp = await chat(client, text, target_code, model)
-            return web.json_response(resp)
-        except openai.RateLimitError as err:
-            logging.warning(f"OpenAI rate limit: {err}")
-            raise web.HTTPTooManyRequests(text="Upstream rate limit")
-        except openai.OpenAIError as err:
-            logging.warning(f"OpenAI error: {err}")
-            raise web.HTTPServiceUnavailable(text="Upstream API error")
-        except IOError as err:
-            logging.warning(f"OpenAI API I/O error: {err}")
-            raise web.HTTPServiceUnavailable(text="Upstream I/O error")
-        except (json.JSONDecodeError, KeyError) as err:
-            logging.info(f"Decoding error: {err} ({model})")
-    logging.warning("All models failed")
-    raise web.HTTPServiceUnavailable()
+    if args.disable_json_mode:
+        resp_format = RESPONSE_FORMAT_TEXT
+    elif args.disable_structured_output:
+        resp_format = RESPONSE_FORMAT_JSON
+    else:
+        resp_format = Translation
+    try:
+        resp = await chat(client, text, target_code, args.model, resp_format)
+        return web.json_response(resp)
+    except openai.RateLimitError as err:
+        logging.warning(f"OpenAI rate limit: {err}")
+        raise web.HTTPTooManyRequests(text="Upstream rate limit")
+    except openai.OpenAIError as err:
+        logging.warning(f"OpenAI error: {err}")
+        raise web.HTTPServiceUnavailable(text="Upstream API error")
+    except IOError as err:
+        logging.warning(f"OpenAI API I/O error: {err}")
+        raise web.HTTPServiceUnavailable(text="Upstream I/O error")
+    except (ValidationError, json.JSONDecodeError, KeyError) as err:
+        logging.warning(f"Decoding error: {err}")
+        raise web.HTTPServiceUnavailable(text="Upstream response decoding error")
 
 
 async def on_cleanup(app: web.Application):
-    del app[openai_app_key]
+    del app[key_openai_app]
 
 
-async def init(openai_api_key: str | None) -> web.Application:
+async def init(args: Args, openai_api_key: str | None) -> web.Application:
     app = web.Application()
     app.add_routes(routes)
-    app[openai_app_key] = AsyncOpenAI(api_key=openai_api_key)
+    app[key_args] = args
+    app[key_openai_app] = AsyncOpenAI(api_key=openai_api_key)
     app.on_cleanup.append(on_cleanup)
     return app
 
 
 def main():
-    logging.basicConfig(format="[%(levelname)s] %(message)s", level=logging.INFO)
+    parser = argparse.ArgumentParser(
+        prog="chatlibre",
+        description="OpenAI-backed translation service for Mastodon instance",
+    )
+    parser.add_argument(
+        "-m", "--model", default=DEFAULT_MODEL, help=f"default to {DEFAULT_MODEL}"
+    )
+    parser.add_argument(
+        "--disable-structured-output",
+        action="store_true",
+        help="for old models which do not support structured output",
+    )
+    parser.add_argument(
+        "--disable-json-mode",
+        action="store_true",
+        help="for even older models, imply --disable-structured-output",
+    )
+    parser.add_argument(
+        "-l",
+        "--listen-host",
+        default="::",
+        help="listen address of HTTP, ignored if systemd-passed socket detected",
+    )
+    parser.add_argument(
+        "-p",
+        "--listen-port",
+        default=8080,
+        type=int,
+        help="listen TCP port of HTTP service",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=["debug", "info", "warning", "error"],
+        help="default to info",
+    )
+    args = Args(**vars(parser.parse_args()))
+    logging.basicConfig(
+        format="[%(levelname)s] %(message)s", level=args.log_level.upper()
+    )
 
     sock = None
     if str(os.getpid()) == os.environ.get("LISTEN_PID"):
@@ -155,7 +240,9 @@ def main():
             openai_api_key = f.read().strip()
             logging.info(f"Load OpenAI API key from {keyfile}")
 
-    web.run_app(init(openai_api_key), sock=sock)
+    host = args.listen_host if sock is None else None
+    port = args.listen_port if sock is None else None
+    web.run_app(init(args, openai_api_key), sock=sock, host=host, port=port)
 
 
 if __name__ == "__main__":
