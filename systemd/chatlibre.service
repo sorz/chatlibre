@@ -6,10 +6,20 @@ After=network.target
 [Service]
 Type=exec
 DynamicUser=yes
+
+CacheDirectory=chatlibre
+Environment=UV_CACHE_DIR=/var/cache/chatlibre/uv
+Environment=UV_PROJECT_ENVIRONMENT=/var/cache/chatlibre/venv
+ExecPaths=/var/cache/chatlibre/venv
+
+# Change /opt/chatlibre below if necessary
 WorkingDirectory=/opt/chatlibre/
 LoadCredential=openai_key:/opt/chatlibre/openai_key
+
+# Cannot do `uv run` directly, uv will drop systemd's socket
+ExecStartPre=/usr/bin/uv sync
+ExecStart=/var/cache/chatlibre/venv/bin/python3 chatlibre.py
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/uv run chatlibre.py
 
 PrivateTmp=true
 PrivateDevices=true
