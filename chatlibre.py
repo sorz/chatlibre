@@ -8,12 +8,13 @@ import argparse
 from pathlib import Path
 from functools import cache
 from dataclasses import dataclass
-from typing import Dict, Any, Union
+from typing import Dict, Any, TypedDict, Union
 
 import openai
 from openai import AsyncOpenAI
 from aiohttp import web
-from pydantic import BaseModel, ValidationError, PositiveInt
+from pydantic import BaseModel, ConfigDict, ValidationError, PositiveInt
+from pydantic.alias_generators import to_camel
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -28,11 +29,16 @@ the results in the following JSON format:
 
 
 class DetectedLanguage(BaseModel):
-    code: str
+    language: str
     confidence: PositiveInt
 
 
 class Translation(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+
     detected_language: DetectedLanguage
     translated_text: list[str]
 
@@ -47,13 +53,12 @@ class Args:
     log_level: str
 
 
-@dataclass
-class ResponseType:
+class ResponseType(TypedDict):
     type: str
 
 
-RESPONSE_FORMAT_TEXT = ResponseType("text")
-RESPONSE_FORMAT_JSON = ResponseType("json_object")
+RESPONSE_FORMAT_TEXT = ResponseType(type="text")
+RESPONSE_FORMAT_JSON = ResponseType(type="json_object")
 
 routes = web.RouteTableDef()
 key_openai_app = web.AppKey("key_openai", AsyncOpenAI)
@@ -80,7 +85,7 @@ def generate_supported_languages():
 
 EXAMPLE = Translation(
     detected_language=DetectedLanguage(
-        code="zh",
+        language="zh",
         confidence=87,
     ),
     translated_text=["<p>Hello</p>", "Bye"],
@@ -89,7 +94,7 @@ EXAMPLE = Translation(
 
 def prompt(target_lang_code: str) -> str:
     lang = languages_code_name().get(target_lang_code, target_lang_code)
-    example = EXAMPLE.model_dump_json(indent=2)
+    example = EXAMPLE.model_dump_json(indent=2, by_alias=True)
     return PROMPT.replace(TAG_EXAMPLE, example).replace(TAG_TARGET, lang)
 
 
@@ -119,7 +124,7 @@ async def chat(
         text_list = [text]
     else:
         text_list = text
-    comp = await client.chat.completions.create(
+    comp = await client.beta.chat.completions.parse(
         model=model,
         response_format=response_format,
         messages=[
@@ -128,14 +133,16 @@ async def chat(
         ],
     )
     logging.debug(comp)
-    resp = json.loads(comp.choices[0].message.content)
-    detected_lang = resp["detectedLanguage"]["language"]
+    message = comp.choices[0].message
+    resp = message.parsed or Translation.model_validate_json(message.content)
+    detected_lang = resp.detected_language.language
     logging.info(
         f"{model} {detected_lang}/{target_code} "
         f"{comp.usage.prompt_tokens}+{comp.usage.completion_tokens} tokens"
     )
+    resp = resp.model_dump(by_alias=True)
     if isinstance(text, str):
-        resp["translatedText"] = resp["translatedText"][0]
+        resp["translated_text"] = resp["translated_text"][0]
     return resp
 
 
