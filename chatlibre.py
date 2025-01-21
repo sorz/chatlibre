@@ -123,7 +123,7 @@ async def translate(request: web.Request) -> web.Response:
             raise web.HTTPServiceUnavailable(text="Upstream I/O error")
         except (json.JSONDecodeError, KeyError) as err:
             logging.info(f"Decoding error: {err} ({model})")
-    logging.warn("All models failed")
+    logging.warning("All models failed")
     raise web.HTTPServiceUnavailable()
 
 

@@ -9,7 +9,7 @@ DynamicUser=yes
 WorkingDirectory=/opt/chatlibre/
 LoadCredential=openai_key:/opt/chatlibre/openai_key
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/chatlibre/chatlibre.py
+ExecStart=/usr/bin/uv run chatlibre.py
 
 PrivateTmp=true
 PrivateDevices=true

@@ -1,0 +1,10 @@
+[project]
+name = "chatlibre"
+version = "0.2.0"
+description = "OpenAI-backed translation service for Mastodon instance"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.11.11",
+    "openai>=1.59.9",
+]

@@ -9,13 +9,13 @@ after: OpenAI.](/assets/meme.webp)
 
 ## Setup
 
-Prerequisite: [openai-python](https://github.com/openai/openai-python)
-
-Run the script:
+Recommand to run with [uv](https://github.com/astral-sh/uv).
+If you want other tools or run it manually, see [pyproject.toml](/pyproject.toml)
+for package dependencies.
 
 ```bash
 export OPENAI_API_KEY=sk-xxxxxxxxxx
-./chatlibre.py
+uv run chatlibre.py
 ```
 
 Update Mastodon [environment variables](https://docs.joinmastodon.org/admin/config/#libre_translate_endpoint):
